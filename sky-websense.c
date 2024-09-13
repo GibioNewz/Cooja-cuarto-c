@@ -1,40 +1,15 @@
-# Paso 3
-$ curl -g 6 http://[fd00:x:y:x]:port'
-
-# sky-websense.c
-
-/**
- * \file
- *         Light and temperature sensor web demo
- * \author
- *         Niclas Finne    <nfi@sics.se>
- *         Joakim Eriksson <joakime@sics.se>
- *         Joel Hoglund    <joel@sics.se>
- */
 
 #include "contiki.h"
-#include "httpd-simple.h"
-#include "dev/sht11/sht11-sensor.h"
-include "dev/light-sensor.h"
+#include "net/ipv6/uip.h"
+#include "os/net/app-layer/httpd-simple/httpd-simple.h"
+#include "dev/sht3x-sensor.h" // Sensor SHT3x para temperatura
+#include "dev/light-sensor.h"
 #include "dev/leds.h"
 #include <stdio.h>
 
 PROCESS(web_sense_process, "Sense Web Demo");
 PROCESS(webserver_nogui_process, "Web server");
-PROCESS_THREAD(webserver_nogui_process, ev, data)
-{
-  PROCESS_BEGIN();
-
-  httpd_init();
-
-  while(1) {
-    PROCESS_WAIT_EVENT_UNTIL(ev == tcpip_event);
-    httpd_appcall(data);
-  }
-
-  PROCESS_END();
-}
-AUTOSTART_PROCESSES(&web_sense_process,&webserver_nogui_process);
+AUTOSTART_PROCESSES(&web_sense_process, &webserver_nogui_process);
 
 #define HISTORY 16
 static int temperature[HISTORY];
@@ -45,19 +20,19 @@ static int sensors_pos;
 static int
 get_light(void)
 {
-  return 10 * light_sensor.value(LIGHT_SENSOR_PHOTOSYNTHETIC) / 7;
+  return 10 * light_sensor.value(0) / 7;  
 }
 /*---------------------------------------------------------------------------*/
 static int
 get_temp(void)
 {
-  return ((sht11_sensor.value(SHT11_SENSOR_TEMP) / 10) - 396) / 10;
+  return sht3x_sensor.value(SHT3X_SENSOR_TEMP) / 100; 
 }
 /*---------------------------------------------------------------------------*/
-static const char *TOP = "<html><head><title>Contiki Web Sense</title></head><body>\n";
+static const char *TOP = "<html><head><title>Contiki-NG Web Sense</title></head><body>\n";
 static const char *BOTTOM = "</body></html>\n";
 /*---------------------------------------------------------------------------*/
-/* Only one single request at time */
+/* Solo una solicitud a la vez */
 static char buf[256];
 static int blen;
 #define ADD(...) do {                                                   \
@@ -87,32 +62,30 @@ PT_THREAD(send_values(struct httpd_state *s))
 
   if(strncmp(s->filename, "/index", 6) == 0 ||
      s->filename[1] == '\0') {
-    /* Default page: show latest sensor values as text (does not
-       require Internet connection to Google for charts). */
     blen = 0;
-    ADD("<h1>Current readings</h1>\n"
-        "Light: %u<br>"
-        "Temperature: %u&deg; C",
+    ADD("<h1>Lecturas actuales</h1>\n"
+        "Luz: %u<br>"
+        "Temperatura: %u&deg; C",
         get_light(), get_temp());
     SEND_STRING(&s->sout, buf);
 
   } else if(s->filename[1] == '0') {
-    /* Turn off leds */
+    /* Apagar leds */
     leds_off(LEDS_ALL);
-    SEND_STRING(&s->sout, "Turned off leds!");
+    SEND_STRING(&s->sout, "¡Leds apagados!");
 
   } else if(s->filename[1] == '1') {
-    /* Turn on leds */
+    /* Encender leds */
     leds_on(LEDS_ALL);
-    SEND_STRING(&s->sout, "Turned on leds!");
+    SEND_STRING(&s->sout, "¡Leds encendidos!");
 
   } else {
     if(s->filename[1] != 't') {
-      generate_chart("Light", "Light", 0, 500, light1);
+      generate_chart("Luz", "Luz", 0, 500, light1);
       SEND_STRING(&s->sout, buf);
     }
     if(s->filename[1] != 'l') {
-      generate_chart("Temperature", "Celsius", 15, 50, temperature);
+      generate_chart("Temperatura", "Celsius", 15, 50, temperature);
       SEND_STRING(&s->sout, buf);
     }
   }
@@ -128,6 +101,20 @@ httpd_simple_get_script(const char *name)
   return send_values;
 }
 /*---------------------------------------------------------------------------*/
+PROCESS_THREAD(webserver_nogui_process, ev, data)
+{
+  PROCESS_BEGIN();
+
+  httpd_init();
+
+  while(1) {
+    PROCESS_WAIT_EVENT_UNTIL(ev == tcpip_event);
+    httpd_appcall(data);
+  }
+
+  PROCESS_END();
+}
+/*---------------------------------------------------------------------------*/
 PROCESS_THREAD(web_sense_process, ev, data)
 {
   static struct etimer timer;
@@ -137,17 +124,17 @@ PROCESS_THREAD(web_sense_process, ev, data)
 
   etimer_set(&timer, CLOCK_SECOND * 2);
   SENSORS_ACTIVATE(light_sensor);
-  SENSORS_ACTIVATE(sht11_sensor);
+  SENSORS_ACTIVATE(sht3x_sensor);  // Activa el sensor de temperatura
 
   while(1) {
     PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&timer));
     etimer_reset(&timer);
 
-    light1[sensors_pos] = get_light();;
+    light1[sensors_pos] = get_light();
     temperature[sensors_pos] = get_temp();
     sensors_pos = (sensors_pos + 1) % HISTORY;
   }
 
   PROCESS_END();
 }
-/*---------------------------------------------------------------------------*/
+
